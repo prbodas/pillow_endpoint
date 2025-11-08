@@ -1,8 +1,0 @@
-name = "tts-waifu-worker"
-main = "src/worker.ts"
-compatibility_date = "2024-09-23"
-compatibility_flags = ["nodejs_compat"]
-
-[vars]
-# You can add config here if needed later
-

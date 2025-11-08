@@ -1,9 +1,9 @@
-TTS Endpoint (Multiple Hosts)
+TTS Endpoint (Render + Deno)
 
 Endpoints
-- GET `/api`:
+- GET `/`:
   - Usage text.
-- GET `/api/tts?stream=true|false&text=...&voice=...&chunk=32768&gap=20`:
+- GET `/tts?stream=true|false&text=...&voice=...&chunk=32768&gap=20`:
   - Optional `parts`: repeat the audio N times in one stream (default 1).
   - Optional `partgap`: ms delay between parts (default 150).
   - Returns `audio/mpeg` speech of text. Defaults to “I love my waifu”.
@@ -11,9 +11,9 @@ Endpoints
   - Optional `multipart=1`: respond with `multipart/mixed` and emit N separate parts in one HTTP response.
 
 Local Dev
-- Install deps: `npm i` (already done)
-- Run with Vercel CLI: `npx vercel dev`
-- Test: `curl -L "http://localhost:3000/api/tts?stream=false" --output waifu.mp3`
+- Install deps: `npm i`
+- Start server: `npm start`
+- Test: `curl -L "http://localhost:8787/tts?stream=false" --output waifu.mp3`
 
 Render (Node server) — no phone number
 1) Push this repo to GitHub (or GitLab).
@@ -33,11 +33,8 @@ Deno Deploy (edge function) — no phone number
 2) Set entrypoint to `deno_deploy/main.ts` and deploy.
 3) Your URL will be like `https://<project>.deno.dev/tts?...`.
 
-Vercel (Edge) — optional
-If you already use Vercel, endpoints are under `/api`. See `api/` and `vercel.json`.
-
 Python Client
 - `scripts/play_waifu.py` can target any host. Examples:
   - Render: `python3 scripts/play_waifu.py --base https://<your-app>.onrender.com`
   - Deno: `python3 scripts/play_waifu.py --base https://<project>.deno.dev`
-  - Local: `python3 scripts/play_waifu.py --base http://localhost:8787` (Node) or `--base http://localhost:3000/api` (Vercel dev)
+  - Local: `python3 scripts/play_waifu.py --base http://localhost:8787`
