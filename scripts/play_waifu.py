@@ -9,6 +9,7 @@ import urllib.request
 import shutil
 import subprocess
 import uuid
+import re
 import io
 
 
@@ -182,10 +183,16 @@ def stream_multipart_to_player(url: str):
             raise RuntimeError(f"HTTP {resp.status}: {resp.reason}")
         ctype = resp.getheader("Content-Type") or ""
         boundary = None
-        if "boundary=" in ctype:
-            boundary = ctype.split("boundary=", 1)[1].strip()
+        m = re.search(r"boundary=\s*\"?([^\";]+)\"?", ctype, flags=re.IGNORECASE)
+        if m:
+            boundary = m.group(1).strip()
         if not boundary:
-            raise RuntimeError("Missing multipart boundary")
+            # Fallback: log and treat as single-stream
+            print("Warning: Missing multipart boundary; falling back to single-stream parser", file=sys.stderr)
+            # Re-open as normal stream_to_player
+            # Cannot reuse resp easily; restart request
+            stream_to_player(url)
+            return
 
         if ff:
             proc = subprocess.Popen([ff, "-nodisp", "-autoexit", "-loglevel", "quiet", "-i", "-"], stdin=subprocess.PIPE)
