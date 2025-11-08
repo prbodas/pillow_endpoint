@@ -1,4 +1,4 @@
-TTS Endpoint (Render + Deno)
+TTS Endpoint (Render)
 
 Endpoints
 - GET `/`:
@@ -28,13 +28,7 @@ Render (Node server) — no phone number
      - `curl -v "https://<your-app>.onrender.com/tts?stream=true&parts=3&multipart=1" -o multipart.bin`
      - Play via Python client: `python3 scripts/play_waifu.py --base https://<your-app>.onrender.com --server-parts 3 --multipart`
 
-Deno Deploy (edge function) — no phone number
-1) Go to https://dash.deno.com → New Project → Link GitHub repo.
-2) Set entrypoint to `deno_deploy/main.ts` and deploy.
-3) Your URL will be like `https://<project>.deno.dev/tts?...`.
-
-Python Client
-- `scripts/play_waifu.py` can target any host. Examples:
-  - Render: `python3 scripts/play_waifu.py --base https://<your-app>.onrender.com`
-  - Deno: `python3 scripts/play_waifu.py --base https://<project>.deno.dev`
+ Python Client
+ - `scripts/play_waifu.py` can target any host. Examples:
+   - Render: `python3 scripts/play_waifu.py --base https://<your-app>.onrender.com`
   - Local: `python3 scripts/play_waifu.py --base http://localhost:8787`
