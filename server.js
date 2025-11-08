@@ -57,34 +57,66 @@ const server = http.createServer(async (req, res) => {
         const gapMs = clampInt(url.searchParams.get('gap'), 0, 2000, 20);
         const parts = clampInt(url.searchParams.get('parts'), 1, 50, 1);
         const partGapMs = clampInt(url.searchParams.get('partgap'), 0, 5000, 150);
+        const multipart = ['1','true','yes','multipart'].includes((url.searchParams.get('multipart')||url.searchParams.get('format')||'').toLowerCase());
         const buf = new Uint8Array(await upstream.arrayBuffer());
 
-        res.writeHead(200, {
-          'content-type': contentType,
-          'cache-control': 'no-store',
-          'transfer-encoding': 'chunked',
-          'connection': 'keep-alive',
-          'x-accel-buffering': 'no',
-          'x-stream-mock': '1',
-          'x-stream-parts': String(parts),
-          ...corsHeaders(),
-        });
-        for (let p = 1; p <= parts; p++) {
-          let offset = 0;
-          while (offset < buf.length) {
-            const end = Math.min(offset + chunkSize, buf.length);
-            const chunk = buf.subarray(offset, end);
-            res.write(chunk);
-            offset = end;
-            if (gapMs > 0 && offset < buf.length) {
-              await delay(gapMs);
+        if (multipart) {
+          const boundary = `waifu-${Date.now().toString(16)}`;
+          res.writeHead(200, {
+            'content-type': `multipart/mixed; boundary=${boundary}`,
+            'cache-control': 'no-store',
+            'transfer-encoding': 'chunked',
+            'connection': 'keep-alive',
+            'x-accel-buffering': 'no',
+            'x-stream-mock': '1',
+            'x-stream-parts': String(parts),
+            ...corsHeaders(),
+          });
+          res.flushHeaders?.();
+          for (let p = 1; p <= parts; p++) {
+            const header = `--${boundary}\r\nContent-Type: ${contentType}\r\nContent-Length: ${buf.length}\r\n\r\n`;
+            res.write(Buffer.from(header, 'utf8'));
+            let offset = 0;
+            while (offset < buf.length) {
+              const end = Math.min(offset + chunkSize, buf.length);
+              res.write(buf.subarray(offset, end));
+              offset = end;
+              if (gapMs > 0 && offset < buf.length) await delay(gapMs);
+            }
+            res.write(Buffer.from('\r\n', 'utf8'));
+            if (p < parts && partGapMs > 0) await delay(partGapMs);
+          }
+          res.write(Buffer.from(`--${boundary}--\r\n`, 'utf8'));
+          res.end();
+        } else {
+          res.writeHead(200, {
+            'content-type': contentType,
+            'cache-control': 'no-store',
+            'transfer-encoding': 'chunked',
+            'connection': 'keep-alive',
+            'x-accel-buffering': 'no',
+            'x-stream-mock': '1',
+            'x-stream-parts': String(parts),
+            ...corsHeaders(),
+          });
+          res.flushHeaders?.();
+          for (let p = 1; p <= parts; p++) {
+            let offset = 0;
+            while (offset < buf.length) {
+              const end = Math.min(offset + chunkSize, buf.length);
+              const chunk = buf.subarray(offset, end);
+              res.write(chunk);
+              offset = end;
+              if (gapMs > 0 && offset < buf.length) {
+                await delay(gapMs);
+              }
+            }
+            if (p < parts && partGapMs > 0) {
+              await delay(partGapMs);
             }
           }
-          if (p < parts && partGapMs > 0) {
-            await delay(partGapMs);
-          }
+          res.end();
         }
-        res.end();
         return;
       } else {
         const arr = await upstream.arrayBuffer();

@@ -8,6 +8,7 @@ Endpoints
   - Optional `partgap`: ms delay between parts (default 150).
   - Returns `audio/mpeg` speech of text. Defaults to “I love my waifu”.
   - `stream=true` streams timed chunks (mock streaming). Tunables: `chunk` bytes, `gap` ms.
+  - Optional `multipart=1`: respond with `multipart/mixed` and emit N separate parts in one HTTP response.
 
 Local Dev
 - Install deps: `npm i` (already done)
@@ -22,7 +23,10 @@ Render (Node server) — no phone number
    - Runtime: Node, Build command: `echo no build`, Start command: `node server.js`.
 3) After deploy, your public URL will be like `https://tts-waifu.onrender.com`.
    - Test non-stream: `curl -L "https://<your-app>.onrender.com/tts?stream=false" --output waifu.mp3`
-   - Test stream: `curl -L "https://<your-app>.onrender.com/tts?stream=true&chunk=32768&gap=20&parts=3&partgap=150" --output waifu_stream.mp3`
+   - Test stream (single audio stream): `curl -L "https://<your-app>.onrender.com/tts?stream=true&chunk=32768&gap=20&parts=3&partgap=150" --output waifu_stream.mp3`
+   - Test multipart (3 distinct parts):
+     - `curl -v "https://<your-app>.onrender.com/tts?stream=true&parts=3&multipart=1" -o multipart.bin`
+     - Play via Python client: `python3 scripts/play_waifu.py --base https://<your-app>.onrender.com --server-parts 3 --multipart`
 
 Deno Deploy (edge function) — no phone number
 1) Go to https://dash.deno.com → New Project → Link GitHub repo.

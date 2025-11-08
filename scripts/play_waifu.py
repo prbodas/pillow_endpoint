@@ -119,8 +119,105 @@ def stream_to_player(url: str, read_chunk: int = 32 * 1024):
                     pass
 
 
-def run_stream_loop(base: str, text: str, voice: str, parts: int, delay: float, chunk: int, gap: int, read_chunk: int, server_parts: int, partgap: int):
-    print(f"Streaming loop: {parts} call(s) — server_parts={server_parts} — text=\"{text}\" voice={voice} chunk={chunk} gap={gap}ms partgap={partgap}ms")
+def parse_multipart_stream(resp, boundary: str, write_bytes):
+    bline = ("--" + boundary).encode("utf-8")
+    end_marker = ("--" + boundary + "--").encode("utf-8")
+    # Read helper
+    def readline() -> bytes:
+        return resp.readline()
+
+    # Consume until first boundary
+    while True:
+        line = readline()
+        if not line:
+            return
+        if line.strip() == bline:
+            break
+
+    while True:
+        # Read headers
+        headers = {}
+        while True:
+            line = readline()
+            if not line:
+                return
+            if line in (b"\r\n", b"\n"):
+                break
+            key, _, val = line.decode("utf-8", errors="ignore").partition(":")
+            headers[key.lower().strip()] = val.strip()
+
+        length = int(headers.get("content-length", "0"))
+        remaining = length
+        while remaining > 0:
+            chunk = resp.read(min(remaining, 64 * 1024))
+            if not chunk:
+                return
+            write_bytes(chunk)
+            remaining -= len(chunk)
+
+        # CRLF after part
+        _ = resp.read(2)
+
+        # Next boundary
+        line = readline()
+        if not line:
+            return
+        if line.strip() == end_marker:
+            return
+        if line.strip() != bline:
+            # Malformed, stop
+            return
+
+
+def stream_multipart_to_player(url: str):
+    ff = detect_ffplay()
+    af = detect_afplay()
+    if not ff and not af:
+        print("No audio player found. Install ffmpeg (ffplay) or use macOS afplay.", file=sys.stderr)
+        sys.exit(2)
+
+    req = urllib.request.Request(url, headers={"User-Agent": "waifu-client/1.0"})
+    with urllib.request.urlopen(req) as resp:
+        if resp.status != 200:
+            raise RuntimeError(f"HTTP {resp.status}: {resp.reason}")
+        ctype = resp.getheader("Content-Type") or ""
+        boundary = None
+        if "boundary=" in ctype:
+            boundary = ctype.split("boundary=", 1)[1].strip()
+        if not boundary:
+            raise RuntimeError("Missing multipart boundary")
+
+        if ff:
+            proc = subprocess.Popen([ff, "-nodisp", "-autoexit", "-loglevel", "quiet", "-i", "-"], stdin=subprocess.PIPE)
+            try:
+                def write_bytes(b: bytes):
+                    assert proc.stdin is not None
+                    proc.stdin.write(b)
+                parse_multipart_stream(resp, boundary, write_bytes)
+                if proc.stdin:
+                    proc.stdin.close()
+                proc.wait()
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+        else:
+            # Buffer all parts into a single temp file and play with afplay
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as f:
+                path = f.name
+                def write_bytes(b: bytes):
+                    f.write(b)
+                parse_multipart_stream(resp, boundary, write_bytes)
+            try:
+                subprocess.run([af, path], check=False)
+            finally:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
+
+def run_stream_loop(base: str, text: str, voice: str, parts: int, delay: float, chunk: int, gap: int, read_chunk: int, server_parts: int, partgap: int, multipart: bool):
+    print(f"Streaming loop: {parts} call(s) — server_parts={server_parts} — multipart={multipart} — text=\"{text}\" voice={voice} chunk={chunk} gap={gap}ms partgap={partgap}ms")
     for i in range(1, parts + 1):
         url = build_url(base, "/tts", {
             "stream": "true",
@@ -131,9 +228,13 @@ def run_stream_loop(base: str, text: str, voice: str, parts: int, delay: float, 
             "chunk": str(chunk),
             "gap": str(gap),
             "partgap": str(partgap),
+            **({"multipart": "1"} if multipart else {}),
         })
         print(f"[part {i}] streaming {url}")
-        stream_to_player(url, read_chunk=read_chunk)
+        if multipart:
+            stream_multipart_to_player(url)
+        else:
+            stream_to_player(url, read_chunk=read_chunk)
         if i != parts and delay > 0:
             time.sleep(delay)
 
@@ -163,12 +264,13 @@ def main():
     parser.add_argument("--server-parts", type=int, default=1, help="Number of parts to include in one streaming response")
     parser.add_argument("--partgap", type=int, default=150, help="Delay (ms) between parts in one streaming response")
     parser.add_argument("--read-chunk", type=int, default=32768, help="Client read size in bytes for streaming")
+    parser.add_argument("--multipart", action="store_true", help="Use HTTP multipart/mixed response with N parts in one stream")
     args = parser.parse_args()
 
     if args.nonstream_first:
         run_non_stream(args.base, args.text, args.voice)
 
-    run_stream_loop(args.base, args.text, args.voice, args.parts, args.delay, args.chunk, args.gap, args.read_chunk, args.server_parts, args.partgap)
+    run_stream_loop(args.base, args.text, args.voice, args.parts, args.delay, args.chunk, args.gap, args.read_chunk, args.server_parts, args.partgap, args.multipart)
 
     if not args.nonstream_first:
         run_non_stream(args.base, args.text, args.voice)
