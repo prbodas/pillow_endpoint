@@ -55,6 +55,8 @@ const server = http.createServer(async (req, res) => {
       if (stream) {
         const chunkSize = clampInt(url.searchParams.get('chunk'), 1024, 1024 * 1024, 32 * 1024);
         const gapMs = clampInt(url.searchParams.get('gap'), 0, 2000, 20);
+        const parts = clampInt(url.searchParams.get('parts'), 1, 50, 1);
+        const partGapMs = clampInt(url.searchParams.get('partgap'), 0, 5000, 150);
         const buf = new Uint8Array(await upstream.arrayBuffer());
 
         res.writeHead(200, {
@@ -64,16 +66,22 @@ const server = http.createServer(async (req, res) => {
           'connection': 'keep-alive',
           'x-accel-buffering': 'no',
           'x-stream-mock': '1',
+          'x-stream-parts': String(parts),
           ...corsHeaders(),
         });
-        let offset = 0;
-        while (offset < buf.length) {
-          const end = Math.min(offset + chunkSize, buf.length);
-          const chunk = buf.subarray(offset, end);
-          res.write(chunk);
-          offset = end;
-          if (gapMs > 0 && offset < buf.length) {
-            await delay(gapMs);
+        for (let p = 1; p <= parts; p++) {
+          let offset = 0;
+          while (offset < buf.length) {
+            const end = Math.min(offset + chunkSize, buf.length);
+            const chunk = buf.subarray(offset, end);
+            res.write(chunk);
+            offset = end;
+            if (gapMs > 0 && offset < buf.length) {
+              await delay(gapMs);
+            }
+          }
+          if (p < parts && partGapMs > 0) {
+            await delay(partGapMs);
           }
         }
         res.end();

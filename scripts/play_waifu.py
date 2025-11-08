@@ -9,6 +9,7 @@ import urllib.request
 import shutil
 import subprocess
 import uuid
+import io
 
 
 def detect_ffplay():
@@ -96,36 +97,40 @@ def stream_to_player(url: str, read_chunk: int = 32 * 1024):
                 if proc.poll() is None:
                     proc.kill()
         else:
-            # Attempt streaming via FIFO for afplay
-            tmpdir = tempfile.gettempdir()
-            fifo_path = os.path.join(tmpdir, f"waifu_fifo_{uuid.uuid4().hex}.mp3")
-            os.mkfifo(fifo_path)
+            # Fallback: buffer to a temp file then play with afplay (not truly real-time).
+            # Note: afplay is unreliable with FIFOs for MP3; buffering avoids 'AudioFileOpen failed'.
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as f:
+                path = f.name
+                total = 0
+                while True:
+                    chunk = resp.read(read_chunk)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    total += len(chunk)
+                    if total % (256 * 1024) < read_chunk:
+                        print(f"  downloaded ~{total//1024} KiB", file=sys.stderr)
             try:
-                proc = subprocess.Popen([af, fifo_path])
-                with open(fifo_path, "wb", buffering=0) as fifo:
-                    while True:
-                        chunk = resp.read(read_chunk)
-                        if not chunk:
-                            break
-                        fifo.write(chunk)
-                proc.wait()
+                subprocess.run([af, path], check=False)
             finally:
                 try:
-                    os.remove(fifo_path)
+                    os.remove(path)
                 except OSError:
                     pass
 
 
-def run_stream_loop(base: str, text: str, voice: str, parts: int, delay: float, chunk: int, gap: int, read_chunk: int):
-    print(f"Streaming loop: {parts} part(s) — text=\"{text}\" voice={voice} chunk={chunk} gap={gap}ms")
+def run_stream_loop(base: str, text: str, voice: str, parts: int, delay: float, chunk: int, gap: int, read_chunk: int, server_parts: int, partgap: int):
+    print(f"Streaming loop: {parts} call(s) — server_parts={server_parts} — text=\"{text}\" voice={voice} chunk={chunk} gap={gap}ms partgap={partgap}ms")
     for i in range(1, parts + 1):
         url = build_url(base, "/tts", {
             "stream": "true",
             "text": text,
             "voice": voice,
-            "part": str(i),
+            # server-side multi-part in a single stream
+            "parts": str(server_parts),
             "chunk": str(chunk),
             "gap": str(gap),
+            "partgap": str(partgap),
         })
         print(f"[part {i}] streaming {url}")
         stream_to_player(url, read_chunk=read_chunk)
@@ -155,13 +160,15 @@ def main():
     parser.add_argument("--nonstream-first", action="store_true", help="Play non-stream sample before the streaming loop")
     parser.add_argument("--chunk", type=int, default=32768, help="Bytes per chunk in server-side mock stream")
     parser.add_argument("--gap", type=int, default=20, help="Delay (ms) between chunks in server-side mock stream")
+    parser.add_argument("--server-parts", type=int, default=1, help="Number of parts to include in one streaming response")
+    parser.add_argument("--partgap", type=int, default=150, help="Delay (ms) between parts in one streaming response")
     parser.add_argument("--read-chunk", type=int, default=32768, help="Client read size in bytes for streaming")
     args = parser.parse_args()
 
     if args.nonstream_first:
         run_non_stream(args.base, args.text, args.voice)
 
-    run_stream_loop(args.base, args.text, args.voice, args.parts, args.delay, args.chunk, args.gap, args.read_chunk)
+    run_stream_loop(args.base, args.text, args.voice, args.parts, args.delay, args.chunk, args.gap, args.read_chunk, args.server_parts, args.partgap)
 
     if not args.nonstream_first:
         run_non_stream(args.base, args.text, args.voice)
