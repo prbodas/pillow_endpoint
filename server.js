@@ -1,7 +1,7 @@
 // Zero-dependency Node HTTP server suitable for Render free plan
 // Provides / and /tts with stream and non-stream modes
-import http from 'node:http';
-import { URL } from 'node:url';
+const http = require('node:http');
+const { URL } = require('node:url');
 
 const PORT = process.env.PORT || 8787;
 
@@ -14,10 +14,24 @@ const server = http.createServer(async (req, res) => {
     }
     const url = new URL(req.url, `http://${req.headers.host}`);
 
+    // Basic CORS support for hardware and browsers
+    setCors(res);
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, corsHeaders());
+      res.end();
+      return;
+    }
+
     if (url.pathname === '/' || url.pathname === '') {
       const usage = `TTS Node Server\n\nGET /tts?stream=true|false&text=...&voice=...&chunk=32768&gap=20\n- Returns audio/mpeg of speech.\n- Default text: "I love my waifu".\n- Default stream: false.\n`;
-      res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
+      res.writeHead(200, { ...corsHeaders(), 'content-type': 'text/plain; charset=utf-8' });
       res.end(usage);
+      return;
+    }
+
+    if (url.pathname === '/health') {
+      res.writeHead(200, { ...corsHeaders(), 'content-type': 'text/plain; charset=utf-8' });
+      res.end('ok');
       return;
     }
 
@@ -47,7 +61,10 @@ const server = http.createServer(async (req, res) => {
           'content-type': contentType,
           'cache-control': 'no-store',
           'transfer-encoding': 'chunked',
+          'connection': 'keep-alive',
+          'x-accel-buffering': 'no',
           'x-stream-mock': '1',
+          ...corsHeaders(),
         });
         let offset = 0;
         while (offset < buf.length) {
@@ -67,16 +84,17 @@ const server = http.createServer(async (req, res) => {
           'content-type': contentType,
           'content-length': String(arr.byteLength),
           'cache-control': 'no-store',
+          ...corsHeaders(),
         });
         res.end(Buffer.from(arr));
         return;
       }
     }
 
-    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+    res.writeHead(404, { ...corsHeaders(), 'content-type': 'text/plain; charset=utf-8' });
     res.end('Not found');
   } catch (err) {
-    res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' });
+    res.writeHead(500, { ...corsHeaders(), 'content-type': 'text/plain; charset=utf-8' });
     res.end('Server error');
     console.error(err);
   }
@@ -85,6 +103,10 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, () => {
   console.log(`Server listening on http://0.0.0.0:${PORT}`);
 });
+
+// Increase keep-alive to help proxies with chunked streams
+server.keepAliveTimeout = 65_000;
+server.headersTimeout = 66_000;
 
 function clampInt(value, min, max, fallback) {
   const n = value ? parseInt(String(value), 10) : NaN;
@@ -104,3 +126,15 @@ async function safeText(resp) {
   }
 }
 
+function corsHeaders() {
+  return {
+    'access-control-allow-origin': '*',
+    'access-control-allow-methods': 'GET,OPTIONS,HEAD',
+    'access-control-allow-headers': '*',
+  };
+}
+
+function setCors(res) {
+  const headers = corsHeaders();
+  for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
+}

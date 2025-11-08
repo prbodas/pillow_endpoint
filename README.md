@@ -14,7 +14,8 @@ Local Dev
 
 Render (Node server) — no phone number
 1) Push this repo to GitHub (or GitLab).
-2) On https://render.com, create a “Web Service”.
+2) One-click deploy: https://render.com/deploy?repo=https://github.com/prbodas/pillow_endpoint
+   - Or on https://render.com, create a “Web Service”.
    - Connect repo, pick the main branch.
    - Runtime: Node, Build command: `echo no build`, Start command: `node server.js`.
 3) After deploy, your public URL will be like `https://tts-waifu.onrender.com`.

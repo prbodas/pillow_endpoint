@@ -3,7 +3,8 @@ services:
     name: tts-waifu
     env: node
     plan: free
+    nodeVersion: 18
     buildCommand: "echo 'no build'"
     startCommand: "node server.js"
     autoDeploy: true
-    healthCheckPath: "/"
+    healthCheckPath: "/health"
