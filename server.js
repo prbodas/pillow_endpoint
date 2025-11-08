@@ -21,16 +21,19 @@ const server = http.createServer(async (req, res) => {
       res.end();
       return;
     }
+    const isHead = req.method === 'HEAD';
 
     if (url.pathname === '/' || url.pathname === '') {
       const usage = `TTS Node Server\n\nGET /tts?stream=true|false&text=...&voice=...&chunk=32768&gap=20\n- Returns audio/mpeg of speech.\n- Default text: "I love my waifu".\n- Default stream: false.\n`;
       res.writeHead(200, { ...corsHeaders(), 'content-type': 'text/plain; charset=utf-8' });
+      if (isHead) return res.end();
       res.end(usage);
       return;
     }
 
-    if (url.pathname === '/health') {
+    if (url.pathname === '/health' || url.pathname === '/health/' || url.pathname === '/healthz' || url.pathname === '/readyz') {
       res.writeHead(200, { ...corsHeaders(), 'content-type': 'text/plain; charset=utf-8' });
+      if (isHead) return res.end();
       res.end('ok');
       return;
     }
@@ -64,12 +67,15 @@ const server = http.createServer(async (req, res) => {
           const boundary = `waifu-${Date.now().toString(16)}`;
           res.writeHead(200, {
             'content-type': `multipart/mixed; boundary=${boundary}`,
-            'cache-control': 'no-store',
+            'cache-control': 'no-store, no-transform',
             'transfer-encoding': 'chunked',
             'connection': 'keep-alive',
             'x-accel-buffering': 'no',
             'x-stream-mock': '1',
             'x-stream-parts': String(parts),
+            'x-boundary': boundary,
+            'pragma': 'no-cache',
+            'x-content-type-options': 'nosniff',
             ...corsHeaders(),
           });
           res.flushHeaders?.();
@@ -91,12 +97,14 @@ const server = http.createServer(async (req, res) => {
         } else {
           res.writeHead(200, {
             'content-type': contentType,
-            'cache-control': 'no-store',
+            'cache-control': 'no-store, no-transform',
             'transfer-encoding': 'chunked',
             'connection': 'keep-alive',
             'x-accel-buffering': 'no',
             'x-stream-mock': '1',
             'x-stream-parts': String(parts),
+            'pragma': 'no-cache',
+            'x-content-type-options': 'nosniff',
             ...corsHeaders(),
           });
           res.flushHeaders?.();

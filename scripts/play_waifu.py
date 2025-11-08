@@ -187,6 +187,11 @@ def stream_multipart_to_player(url: str):
         if m:
             boundary = m.group(1).strip()
         if not boundary:
+            # try server-provided debug header
+            xbound = resp.getheader("X-Boundary")
+            if xbound:
+                boundary = xbound.strip()
+        if not boundary:
             # Fallback: log and treat as single-stream
             print("Warning: Missing multipart boundary; falling back to single-stream parser", file=sys.stderr)
             # Re-open as normal stream_to_player
