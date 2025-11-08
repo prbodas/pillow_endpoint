@@ -3,3 +3,5 @@ dist
 .dev.vars
 package-lock.json
 waifu.mp3
+.DS_Store
+.wrangler
