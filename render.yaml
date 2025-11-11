@@ -10,3 +10,16 @@ services:
     envVars:
       - key: NODE_VERSION
         value: 18
+  - type: web
+    name: ai-waifu
+    env: node
+    plan: free
+    buildCommand: "echo 'no build'"
+    startCommand: "node server_ai.js"
+    autoDeploy: true
+    healthCheckPath: "/health"
+    envVars:
+      - key: NODE_VERSION
+        value: 18
+      # Add GEMINI_API_KEY in Render dashboard as a secret env var
+      # Add/point VOSK_MODEL_DIR to a model path if hosting models (may require persistent disk)

@@ -58,11 +58,30 @@ Render (Node server) — no phone number
    - Connect repo, pick the main branch.
    - Runtime: Node, Build command: `echo no build`, Start command: `node server.js`.
 3) After deploy, your public URL will be like `https://tts-waifu.onrender.com`.
-   - Test non-stream: `curl -L "https://<your-app>.onrender.com/tts?stream=false" --output waifu.mp3`
+  - Test non-stream: `curl -L "https://<your-app>.onrender.com/tts?stream=false" --output waifu.mp3`
    - Test stream (single audio stream): `curl -L "https://<your-app>.onrender.com/tts?stream=true&chunk=32768&gap=20&parts=3&partgap=150" --output waifu_stream.mp3`
   - Test multipart (3 distinct parts):
      - `curl -v "https://<your-app>.onrender.com/tts?stream=true&parts=3&multipart=1" -o multipart.bin`
      - Play via Python client: `python3 scripts/examples/play_waifu.py --base https://<your-app>.onrender.com --server-parts 3 --multipart`
+
+Prod AI Service
+- render.yaml now defines two services:
+  - `tts-waifu`: demo TTS streaming and non-stream (existing basic endpoint).
+  - `ai-waifu`: AI endpoint for ASR + LLM + TTS with persistent sessions.
+- Configure secrets on Render for `ai-waifu`:
+  - Add env var `GEMINI_API_KEY` (secret).
+  - Add env var `VOSK_MODEL_DIR` pointing to your Vosk model path if hosting ASR on the service. Hosting models may require a paid plan and/or persistent disk.
+    - Alternative: run the ASR locally and only use `/llm` remotely.
+- Endpoints (ai-waifu):
+  - `POST /llm?session=...&llm_model=...&system=...&reset=1` with `{ "text": "..." }` → `{ ok, reply }`.
+  - `POST /transcribe?return=original|tts|llm_tts&voice=...&session=...&llm_model=...&system=...` with binary audio body → `multipart/mixed` parts: JSON transcript (+ assistant text when llm_tts), then audio.
+  - Aliases: `/ai/llm` and `/ai/transcribe` are available for clarity.
+
+Prod Client
+- Minimal client aimed at lightweight devices:
+  - `scripts/prod_mic_convo.py` records locally and sends to `ai-waifu` (`/transcribe?return=llm_tts`). All compute runs on the server.
+  - Example: `python3 scripts/prod_mic_convo.py --base https://<ai-service>.onrender.com --session dev1 --voice Joanna`
+  - Set default base via env: `export AI_BASE=https://<ai-service>.onrender.com`
 
  Python Client
  - `scripts/examples/play_waifu.py` can target any host. Examples:
