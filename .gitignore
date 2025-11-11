@@ -5,3 +5,5 @@ package-lock.json
 waifu.mp3
 .DS_Store
 .wrangler
+.env.local
+.venv
