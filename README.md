@@ -27,9 +27,9 @@ Deploy to Render (Docker)
 
 Clients
 - Curl:
-  - `/tts`: `./scripts/curl_play.sh -b https://<service>.onrender.com -t "hello" -v Brian`
-  - `/llm_tts` (text): `./scripts/curl_llm_tts.sh -b https://<service>.onrender.com -t "say hello" -v Joanna`
-  - `/llm_tts` (mic): `./scripts/curl_llm_tts.sh -b https://<service>.onrender.com -m -v Brian`
+  - `/tts`: `./scripts/curl_play.sh -b https://tts-waifu.onrender.com -t "hello" -v Brian`
+  - `/llm_tts` (text): `./scripts/curl_llm_tts.sh -b https://tts-waifu.onrender.com -t "say hello" -v Joanna`
+  - `/llm_tts` (mic): `./scripts/curl_llm_tts.sh -b https://tts-waifu.onrender.com -m -v Brian`
 - Python mic client: `python3 scripts/mic_llm_tts.py` (add `--pi --alsa-dev plughw:1,0` on Raspberry Pi)
 
 Testing
