@@ -5,7 +5,7 @@
 import { execSync } from 'node:child_process';
 
 const API = 'https://api.render.com/v1';
-const SERVICE_NAME = process.env.SERVICE_NAME || 'ai-waifu';
+let SERVICE_NAME = process.env.SERVICE_NAME || 'tts-waifu';
 const BRANCH = process.env.BRANCH || 'main';
 const RENDER_API_KEY = process.env.RENDER_API_KEY || '';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
@@ -33,9 +33,15 @@ if (!REPO_URL) {
 const headers = {
   Authorization: `Bearer ${RENDER_API_KEY}`,
   'Content-Type': 'application/json',
+  Accept: 'application/json',
 };
 
 async function main() {
+  // Allow overriding service via CLI: --service <name>
+  const idx = process.argv.indexOf('--service');
+  if (idx !== -1 && process.argv[idx+1]) {
+    SERVICE_NAME = process.argv[idx+1];
+  }
   console.log(`Deploying service '${SERVICE_NAME}' from ${REPO_URL} (branch ${BRANCH})`);
   const svcId = await findServiceByName(SERVICE_NAME);
   if (svcId) {
@@ -45,12 +51,21 @@ async function main() {
     console.log('Deploy triggered. Visit Render dashboard for status.');
     return;
   }
-  console.log('Creating new service...');
-  const created = await createService({ name: SERVICE_NAME, repo: REPO_URL, branch: BRANCH });
-  console.log(`Created service id=${created.id}`);
-  if (created.serviceDetails?.url) {
-    console.log(`Once live: ${created.serviceDetails.url}`);
+  console.log('Service not found. Use blueprint deploy instead:');
+  console.log('  ./scripts/deploy_via_blueprint.sh');
+  process.exit(2);
+}
+
+function normalizeRepo(url) {
+  if (!url) return url;
+  // Convert SSH form git@github.com:user/repo.git to https://github.com/user/repo.git
+  const sshMatch = url.match(/^git@([^:]+):(.+)$/);
+  if (sshMatch) {
+    const host = sshMatch[1];
+    const path = sshMatch[2];
+    return `https://${host}/${path}`;
   }
+  return url;
 }
 
 async function findServiceByName(name) {
@@ -79,36 +94,9 @@ async function triggerDeploy(id) {
   if (!res.ok) throw new Error(`Trigger deploy failed: ${res.status}`);
 }
 
-async function createService({ name, repo, branch }) {
-  const body = {
-    type: 'web',
-    name,
-    env: 'node',
-    repo,
-    branch,
-    buildCommand: 'echo no build',
-    startCommand: 'node server_ai.js',
-    healthCheckPath: '/health',
-    autoDeploy: true,
-    envVars: [
-      { key: 'NODE_VERSION', value: '18' },
-      { key: 'GEMINI_API_KEY', value: GEMINI_API_KEY },
-    ],
-  };
-  const res = await fetch(`${API}/services`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const txt = await res.text().catch(() => '');
-    throw new Error(`Create service failed: ${res.status} ${txt}`);
-  }
-  return await res.json();
-}
+// createService removed to encourage using blueprint flow
 
 main().catch((e) => {
   console.error(e?.stack || String(e));
   process.exit(1);
 });
-

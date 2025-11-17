@@ -16,10 +16,15 @@ def post_json(base: str, text: str, voice: str, session: str, model: str, debug:
         "llm_model": model,
     }).encode('utf-8')
     req = urllib.request.Request(url, data=payload, headers={'Content-Type': 'application/json', 'User-Agent': 'deployed-llm-tts-test/1.0'}, method='POST')
-    with urllib.request.urlopen(req) as resp:
-        if resp.status != 200:
-            raise RuntimeError(f"HTTP {resp.status}: {resp.read().decode('utf-8', errors='ignore')}")
-        return resp.read(), (resp.getheader('Content-Type') or 'audio/mpeg')
+    try:
+        with urllib.request.urlopen(req) as resp:
+            if resp.status != 200:
+                body = resp.read().decode('utf-8', errors='ignore')
+                raise RuntimeError(f"HTTP {resp.status}: {body}")
+            return resp.read(), (resp.getheader('Content-Type') or 'audio/mpeg')
+    except urllib.error.HTTPError as e:
+        body = e.read().decode('utf-8', errors='ignore')
+        raise RuntimeError(f"HTTP {e.code} {e.reason}: {body}")
 
 
 def save_and_play(buf: bytes, ctype: str):
@@ -51,6 +56,11 @@ def main():
     ap.add_argument('--debug', action='store_true', help='Add ?debug=1 to request')
     args = ap.parse_args()
 
+    # Basic base URL validation
+    if '://' not in args.base or args.base.endswith('://') or args.base.endswith(':///'):
+        print('Invalid --base URL. Example: https://your-service.onrender.com', file=sys.stderr)
+        sys.exit(2)
+
     try:
         audio, ctype = post_json(args.base, args.text, args.voice, args.session, args.model, args.debug)
         save_and_play(audio, ctype)
@@ -61,4 +71,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

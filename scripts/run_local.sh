@@ -27,6 +27,6 @@ echo "Using VOSK_PYTHON=$VOSK_PYTHON"
 if [ -n "${GEMINI_API_KEY:-}" ]; then
   echo "GEMINI_API_KEY is set (length ${#GEMINI_API_KEY})"
 else
-  echo "GEMINI_API_KEY not set — /llm and llm_tts will fail"
+  echo "GEMINI_API_KEY not set — /llm_tts will fail"
 fi
 node "$ROOT_DIR/server.js"
