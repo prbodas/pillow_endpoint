@@ -180,6 +180,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url.pathname === '/llm') {
+      // Deprecated: use /llm_tts instead
+      res.writeHead(410, { ...corsHeaders(), 'content-type': 'application/json' });
+      return res.end(JSON.stringify({ ok: false, error: '/llm deprecated; use /llm_tts', use: '/llm_tts' }));
       if (req.method === 'GET') {
         const help = {
           method: 'POST',
@@ -237,7 +240,7 @@ const server = http.createServer(async (req, res) => {
         const help = {
           method: 'POST',
           path: '/llm_tts',
-          body: { text: 'your plain text', voice: 'Brian', session: 'optional id', llm_model: 'gemini-2.0-flash', system: 'optional' },
+          accepts: 'application/json {text,voice,session,llm_model,system} OR audio/* binary body',
           returns: 'audio/mpeg of assistant reply (no multipart)'
         };
         res.writeHead(200, { ...corsHeaders(), 'content-type': 'application/json' });
@@ -252,24 +255,74 @@ const server = http.createServer(async (req, res) => {
       const preview = buf.toString('utf8').slice(0, 256);
       debugLog(debug, 'llm_tts headers content-type=', ctypeIn);
       debugLog(debug, 'llm_tts body bytes=', buf.length, 'preview=', preview);
-      let data = {};
-      try {
-        data = JSON.parse(preview.length === buf.length ? preview : buf.toString('utf8'));
-      } catch (e) {
+
+      let userText = '';
+      let sessionId = 'default';
+      let model = 'gemini-2.0-flash';
+      let systemParam = '';
+      let voice = 'Brian';
+
+      const isJson = /application\/(json|\w+\+json)|text\//i.test(ctypeIn);
+      const isAudio = /audio\//i.test(ctypeIn) || ctypeIn.toLowerCase() === 'application/octet-stream';
+
+      if (isJson) {
+        let data = {};
+        try {
+          data = JSON.parse(preview.length === buf.length ? preview : buf.toString('utf8'));
+        } catch (e) {
+          res.writeHead(400, { ...corsHeaders(), 'content-type': 'text/plain; charset=utf-8' });
+          return res.end('Invalid JSON');
+        }
+        debugLog(debug, 'llm_tts parsed data=', safeSlice(JSON.stringify(data), 512));
+        userText = (data && typeof data.text === 'string') ? data.text : '';
+        sessionId = data.session || sessionId;
+        model = data.llm_model || model;
+        systemParam = data.system || systemParam;
+        voice = data.voice || voice;
+        if (!userText) {
+          debugLog(debug, 'llm_tts missing text in JSON');
+          res.writeHead(400, { ...corsHeaders(), 'content-type': 'text/plain; charset=utf-8' });
+          return res.end('Missing text');
+        }
+      } else if (isAudio) {
+        // Transcribe audio with Vosk, then proceed
+        const modelDir = process.env.VOSK_MODEL_DIR;
+        if (!modelDir) {
+          res.writeHead(500, { ...corsHeaders(), 'content-type': 'text/plain; charset=utf-8' });
+          return res.end('VOSK_MODEL_DIR is not set for audio transcription');
+        }
+        try {
+          const conf = path.join(modelDir, 'conf', 'model.conf');
+          if (!fs.existsSync(conf)) throw new Error(`Missing model files at ${conf}`);
+        } catch (e) {
+          res.writeHead(500, { ...corsHeaders(), 'content-type': 'text/plain; charset=utf-8' });
+          return res.end(`VOSK model path invalid: ${String(e?.message || e)}`);
+        }
+        const suffix = guessExt(ctypeIn);
+        const tmp = await writeTemp(buf, suffix);
+        let transcript;
+        try {
+          transcript = await runVosk(tmp.path, modelDir);
+        } catch (e) {
+          res.writeHead(500, { ...corsHeaders(), 'content-type': 'text/plain; charset=utf-8' });
+          return res.end('Transcription error: ' + String(e?.message || e));
+        }
+        userText = (transcript && transcript.text) ? String(transcript.text).trim() : '';
+        debugLog(debug, 'llm_tts transcribed text=', userText);
+        // Allow overriding via query string for voice/model/session/system
+        sessionId = url.searchParams.get('session') || sessionId;
+        model = url.searchParams.get('llm_model') || model;
+        systemParam = url.searchParams.get('system') || systemParam;
+        voice = url.searchParams.get('voice') || voice;
+        if (!userText) {
+          res.writeHead(400, { ...corsHeaders(), 'content-type': 'text/plain; charset=utf-8' });
+          return res.end('No speech detected');
+        }
+      } else {
         res.writeHead(400, { ...corsHeaders(), 'content-type': 'text/plain; charset=utf-8' });
-        return res.end('Invalid JSON');
+        return res.end('Unsupported Content-Type. Send application/json or audio/*');
       }
-      debugLog(debug, 'llm_tts parsed data=', safeSlice(JSON.stringify(data), 512));
-      const userText = (data && typeof data.text === 'string') ? data.text : '';
-      if (!userText) {
-        debugLog(debug, 'llm_tts missing text in body');
-        res.writeHead(400, { ...corsHeaders(), 'content-type': 'text/plain; charset=utf-8' });
-        return res.end('Missing text');
-      }
-      const sessionId = data.session || 'default';
-      const model = data.llm_model || 'gemini-2.0-flash';
-      const systemParam = data.system || '';
-      const voice = data.voice || 'Brian';
+
       try {
         const messages = buildMessages(sessionId, systemParam, userText);
         const sysText = systemParam || (convoStore.get(sessionId)?.system) || '';
@@ -288,6 +341,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (url.pathname === '/transcribe') {
+      // Deprecated: use /llm_tts with audio/* body instead of /transcribe
+      res.writeHead(410, { ...corsHeaders(), 'content-type': 'application/json' });
+      return res.end(JSON.stringify({ ok: false, error: '/transcribe deprecated; send audio to /llm_tts', use: '/llm_tts' }));
       if (req.method === 'GET') {
         const help = {
           method: 'POST',

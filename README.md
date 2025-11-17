@@ -1,57 +1,35 @@
 TTS Endpoint (Render)
 
-Endpoints
+Endpoints (kept)
 - GET `/`:
   - Usage text.
 - GET `/tts?stream=true|false&text=...&voice=...&chunk=32768&gap=20`:
-  - Optional `parts`: repeat the audio N times in one stream (default 1).
-  - Optional `partgap`: ms delay between parts (default 150).
   - Returns `audio/mpeg` speech of text. Defaults to “I love my waifu”.
   - `stream=true` streams timed chunks (mock streaming). Tunables: `chunk` bytes, `gap` ms.
-  - Optional `multipart=1`: respond with `multipart/mixed` and emit N separate parts in one HTTP response.
- - GET `/transcribe`:
-   - Returns a small JSON guide for how to call the POST endpoint.
- - POST `/transcribe?return=original|tts|none&voice=Brian` with raw audio body:
-   - Uses local Vosk to transcribe the audio (no external calls for ASR).
-   - Returns `multipart/mixed`: part 1 is JSON transcript, part 2 is audio.
-   - `return` controls the audio part: `original` (echo input), `tts` (speech of transcript via proxy TTS), or `none` (JSON only).
+- POST `/llm_tts` (direct audio of LLM reply):
+  - JSON mode: `{ text, voice?, session?, llm_model?, system? }` → `audio/mpeg`
+  - Audio-in mode: send binary audio (`audio/wav|mpeg|ogg`) with optional query `voice`, `session`, `llm_model`, `system`. Server transcribes (Vosk), calls Gemini, returns TTS.
 
 Local Dev
 - Install deps: `npm i`
 - Start server: `npm start`
 - Test: `curl -L "http://localhost:8787/tts?stream=false" --output waifu.mp3`
 
-Vosk setup (offline, private ASR)
+Vosk setup (offline ASR)
 - Install Python deps: `pip3 install vosk sounddevice numpy`
 - Install ffmpeg (for audio conversion): macOS `brew install ffmpeg` (or your OS package manager)
 - Download a Vosk model (small English example): https://alphacephei.com/vosk/models
   - Unzip and set env var to the model directory, e.g. `export VOSK_MODEL_DIR=/path/to/vosk-model-small-en-us-0.15`
 
-Transcription test
-- JSON only: `curl -s -X POST --data-binary @sample.wav -H 'Content-Type: audio/wav' 'http://127.0.0.1:8787/transcribe?return=none' | jq .`
-- Multipart with original audio echo: `python3 scripts/examples/call_transcribe.py --file sample.wav --play`
-- Multipart with TTS audio of the transcript: `python3 scripts/examples/call_transcribe.py --file sample.wav --return tts --play`
+LLM→TTS tests
+- JSON (local): `./scripts/curl_llm_tts.sh -b http://127.0.0.1:8787 -t "say hello" -v Brian`
+- Audio-in (local): `./scripts/curl_llm_tts.sh -b http://127.0.0.1:8787 -f sample.wav -v Brian`
 
-Mic capture + transcribe (local)
-- macOS will announce and capture from default mic, then transcribe:
-  - `python3 scripts/mic_transcribe.py --play`
-  - Options: `--max-seconds 10`, `--return tts`, `--voice Brian`
-  - Grant Terminal mic permissions if prompted.
+Mic → LLM→TTS
+- mac default playback: `python3 scripts/mic_llm_tts.py`
+- Pi ALSA playback: `python3 scripts/mic_llm_tts.py --pi --alsa-dev plughw:1,0`
 
-LLM talkback (Gemini)
-- Keep your API key private. Do NOT commit it. Create `.env.local` with:
-  - `GEMINI_API_KEY=AIza...`
-- Start with `scripts/run_local.sh` so the env is loaded.
-- File-based (persistent session): `python3 scripts/call_transcribe.py --file sample.wav --return llm_tts --voice Brian --session cli1`
-- Mic-based (persistent session): `python3 scripts/mic_transcribe.py --return llm_tts --voice Brian --session mic1 --play`
-- Hands-free voice chat loop (female voice): `python3 scripts/mic_convo.py --voice Joanna --session mic1`
-  - Commands inside the tool: press Enter to speak, `/reset` to clear, `/voice Amy` to switch voice, `/quit` to exit.
-- Test LLM completion alone (no audio):
-  - One-shot: `python3 scripts/llm_chat.py --text "Hey there!"`
-  - Interactive: `python3 scripts/llm_chat.py --session chat1`
-  - Reset history: add `&reset=1` to the transcribe URL or change session id.
-
-Render (Node server) — no phone number
+Render (Node server)
 1) Push this repo to GitHub (or GitLab).
 2) One-click deploy: https://render.com/deploy?repo=https://github.com/prbodas/pillow_endpoint
    - Or on https://render.com, create a “Web Service”.
@@ -60,9 +38,7 @@ Render (Node server) — no phone number
 3) After deploy, your public URL will be like `https://tts-waifu.onrender.com`.
   - Test non-stream: `curl -L "https://<your-app>.onrender.com/tts?stream=false" --output waifu.mp3`
    - Test stream (single audio stream): `curl -L "https://<your-app>.onrender.com/tts?stream=true&chunk=32768&gap=20&parts=3&partgap=150" --output waifu_stream.mp3`
-  - Test multipart (3 distinct parts):
-     - `curl -v "https://<your-app>.onrender.com/tts?stream=true&parts=3&multipart=1" -o multipart.bin`
-     - Play via Python client: `python3 scripts/examples/play_waifu.py --base https://<your-app>.onrender.com --server-parts 3 --multipart`
+  - LLM→TTS: `./scripts/curl_llm_tts.sh -b https://<ai-service>.onrender.com -t "say hello" -v Brian`
 
 Prod AI Service
 - render.yaml now defines two services:
@@ -94,10 +70,10 @@ Prod Clients
     - mac default playback: `python3 scripts/mic_llm_tts.py`
     - Pi ALSA playback: `python3 scripts/mic_llm_tts.py --pi --alsa-dev plughw:1,0`
 
- Python Client
- - `scripts/examples/play_waifu.py` can target any host. Examples:
-   - Render: `python3 scripts/examples/play_waifu.py --base https://<your-app>.onrender.com`
-   - Local: `python3 scripts/examples/play_waifu.py --base http://localhost:8787`
+ Scripts
+ - TTS demo: `./scripts/curl_play.sh`
+ - LLM→TTS: `./scripts/curl_llm_tts.sh` (text/file/mic)
+ - Mic Python: `python3 scripts/mic_llm_tts.py`
 
 Testing
 - Uses Node's built-in test runner (no extra deps).

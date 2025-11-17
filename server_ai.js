@@ -48,6 +48,9 @@ const server = http.createServer(async (req, res) => {
     const pathName = url.pathname.startsWith('/ai/') ? url.pathname.slice(3) : url.pathname;
 
     if (pathName === '/llm') {
+      // Deprecated in favor of /llm_tts
+      res.writeHead(410, { ...corsHeaders(), 'content-type': 'application/json' });
+      return res.end(JSON.stringify({ ok: false, error: '/llm deprecated; use /llm_tts', use: '/llm_tts' }));
       if (req.method === 'GET') {
         const help = {
           method: 'POST',
@@ -142,6 +145,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathName === '/transcribe') {
+      // Deprecated in favor of posting audio directly to /llm_tts
+      res.writeHead(410, { ...corsHeaders(), 'content-type': 'application/json' });
+      return res.end(JSON.stringify({ ok: false, error: '/transcribe deprecated; send audio to /llm_tts', use: '/llm_tts' }));
       if (req.method === 'GET') {
         const help = {
           method: 'POST',
