@@ -1,0 +1,15 @@
+.git
+node_modules
+.venv
+tmp
+tts_downloads
+*.log
+*.local
+*.env
+*.bin
+tests
+test
+scripts/examples
+models
+prod_reply_*.bin
+
