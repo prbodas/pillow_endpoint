@@ -15,6 +15,36 @@ const MAX_HISTORY_MESSAGES = 20; // cap total role messages kept per session
 
 const DEFAULT_SYSTEM = "Return plain text only. No markdown, emojis, code blocks, or lists. Keep replies short (1-2 sentences) unless asked otherwise.";
 
+function qBool(val) {
+  if (!val) return false;
+  const s = String(val).toLowerCase();
+  return ['1','true','yes','on'].includes(s);
+}
+
+function debugLog(enabled, ...args) {
+  if (enabled) console.log('[DEBUG]', ...args);
+}
+
+async function readBody(req) {
+  const chunks = [];
+  let size = 0;
+  await new Promise((resolve, reject) => {
+    req.on('data', (c) => { chunks.push(c); size += c.length; });
+    req.on('end', resolve);
+    req.on('error', reject);
+  });
+  return Buffer.concat(chunks, size);
+}
+
+function safeSlice(s, max = 512) {
+  try {
+    const str = String(s);
+    return str.length > max ? str.slice(0, max) + '…' : str;
+  } catch {
+    return '';
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     if (!req.url) {
@@ -197,6 +227,63 @@ const server = http.createServer(async (req, res) => {
         const payload = { ok: false, error: String(e?.message || e) };
         res.writeHead(502, { ...corsHeaders(), 'content-type': 'application/json' });
         return res.end(JSON.stringify(payload));
+      }
+    }
+
+    // Direct audio for LLM reply: POST /llm_tts { text, voice?, session?, llm_model?, system? }
+    if (url.pathname === '/llm_tts') {
+      const debug = qBool(url.searchParams.get('debug'));
+      if (req.method === 'GET') {
+        const help = {
+          method: 'POST',
+          path: '/llm_tts',
+          body: { text: 'your plain text', voice: 'Brian', session: 'optional id', llm_model: 'gemini-2.0-flash', system: 'optional' },
+          returns: 'audio/mpeg of assistant reply (no multipart)'
+        };
+        res.writeHead(200, { ...corsHeaders(), 'content-type': 'application/json' });
+        return res.end(JSON.stringify(help, null, 2));
+      }
+      if (req.method !== 'POST') {
+        res.writeHead(405, { ...corsHeaders(), 'content-type': 'text/plain; charset=utf-8' });
+        return res.end('Method Not Allowed');
+      }
+      const ctypeIn = String(req.headers['content-type'] || '');
+      const buf = await readBody(req);
+      const preview = buf.toString('utf8').slice(0, 256);
+      debugLog(debug, 'llm_tts headers content-type=', ctypeIn);
+      debugLog(debug, 'llm_tts body bytes=', buf.length, 'preview=', preview);
+      let data = {};
+      try {
+        data = JSON.parse(preview.length === buf.length ? preview : buf.toString('utf8'));
+      } catch (e) {
+        res.writeHead(400, { ...corsHeaders(), 'content-type': 'text/plain; charset=utf-8' });
+        return res.end('Invalid JSON');
+      }
+      debugLog(debug, 'llm_tts parsed data=', safeSlice(JSON.stringify(data), 512));
+      const userText = (data && typeof data.text === 'string') ? data.text : '';
+      if (!userText) {
+        debugLog(debug, 'llm_tts missing text in body');
+        res.writeHead(400, { ...corsHeaders(), 'content-type': 'text/plain; charset=utf-8' });
+        return res.end('Missing text');
+      }
+      const sessionId = data.session || 'default';
+      const model = data.llm_model || 'gemini-2.0-flash';
+      const systemParam = data.system || '';
+      const voice = data.voice || 'Brian';
+      try {
+        const messages = buildMessages(sessionId, systemParam, userText);
+        const sysText = systemParam || (convoStore.get(sessionId)?.system) || '';
+        const mergedSystem = [sysText, DEFAULT_SYSTEM].filter(Boolean).join("\n\n");
+        const reply = await callGemini({ model, system: mergedSystem, messages });
+        appendHistory(sessionId, systemParam, userText, reply);
+        const { audio, contentType } = await fetchTTS(voice, reply || '');
+        debugLog(debug, 'llm_tts reply text=', reply, 'audio bytes=', audio.length, 'ctype=', contentType);
+        res.writeHead(200, { ...corsHeaders(), 'content-type': contentType, 'cache-control': 'no-store', 'content-length': String(audio.length) });
+        return res.end(audio);
+      } catch (e) {
+        debugLog(debug, 'llm_tts error=', e?.stack || String(e));
+        res.writeHead(502, { ...corsHeaders(), 'content-type': 'text/plain; charset=utf-8' });
+        return res.end('Upstream error: ' + String(e?.message || e));
       }
     }
 

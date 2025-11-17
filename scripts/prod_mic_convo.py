@@ -102,19 +102,86 @@ def post_llm_tts(base: str, wav_bytes: bytes, session: str, voice: str, llm_mode
     req = urllib.request.Request(url, data=wav_bytes, headers={"Content-Type": "audio/wav", "User-Agent": "prod-mic/1.0"}, method='POST')
     return urllib.request.urlopen(req)
 
+# Helpers to parse server response and play audio
+def parse_multipart(resp, on_json, on_audio):
+    import re
+    ctype = resp.getheader('Content-Type') or ''
+    m = re.search(r"boundary=\s*\"?([^\";]+)\"?", ctype, flags=re.IGNORECASE)
+    boundary = m.group(1) if m else (resp.getheader('X-Boundary') or '').strip()
+    if not boundary:
+        raise RuntimeError('Missing multipart boundary')
+    raw = resp.read()
+    sep = ("--" + boundary).encode('utf-8')
+    parts = raw.split(sep)
+    for part in parts:
+        part = part.strip()
+        if not part or part == b'--':
+            continue
+        if part.startswith(b"\r\n"):
+            part = part[2:]
+        if part.endswith(b"--"):
+            part = part[:-2]
+        if b"\r\n\r\n" not in part:
+            continue
+        header_blob, body = part.split(b"\r\n\r\n", 1)
+        headers = {}
+        for line in header_blob.split(b"\r\n"):
+            if not line:
+                continue
+            key, _, val = line.decode('utf-8', errors='ignore').partition(':')
+            headers[key.lower().strip()] = val.strip()
+        pctype = headers.get('content-type', '')
+        if 'application/json' in pctype:
+            on_json(body)
+        elif 'audio/' in pctype or pctype == 'application/octet-stream':
+            on_audio(body, pctype)
+
+def save_and_play(audio_bytes: bytes, ctype: str):
+    import tempfile, shutil, subprocess
+    suffix = '.mp3' if 'mpeg' in ctype else '.wav'
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as f:
+        out = f.name
+        f.write(audio_bytes)
+    print(f"Saved audio to {out}")
+    # Prefer mpg123, then ffmpeg->aplay, then ffplay/afplay
+    mpg = shutil.which('mpg123')
+    if mpg:
+        subprocess.run([mpg, '-q', out], check=False)
+        return
+    aplay = shutil.which('aplay')
+    ffmpeg = shutil.which('ffmpeg')
+    if aplay and ffmpeg:
+        p1 = subprocess.Popen([ffmpeg, '-loglevel', 'error', '-i', out, '-f', 'wav', '-'], stdout=subprocess.PIPE)
+        assert p1.stdout is not None
+        subprocess.run([aplay, '-q'], stdin=p1.stdout, check=False)
+        p1.stdout.close()
+        p1.wait()
+        return
+    player = shutil.which('ffplay') or shutil.which('afplay')
+    if player:
+        args = [player]
+        if player.endswith('ffplay'):
+            args += ['-nodisp', '-autoexit', '-loglevel', 'quiet', out]
+        else:
+            args += [out]
+        subprocess.run(args, check=False)
+    else:
+        print('No audio player found. Install mpg123 or ffmpeg+aplay for best results.', file=sys.stderr)
+
 
 def main():
     ap = argparse.ArgumentParser(description='Prod mic client — all compute on server via /transcribe?return=llm_tts')
-    ap.add_argument('--base', default=os.environ.get('AI_BASE', 'https://<your-ai-service>.onrender.com'), help='AI server base URL')
-    ap.add_argument('--session', default='prod', help='Conversation session id')
-    ap.add_argument('--voice', default='Joanna', help='TTS voice')
-    ap.add_argument('--llm-model', default='gemini-2.0-flash', help='Gemini model id')
+    # Hardcoded, sensible local defaults; flags remain optional overrides
+    ap.add_argument('--base', default='http://127.0.0.1:8787', help='AI server base URL (default: http://127.0.0.1:8787)')
+    ap.add_argument('--session', default='prod', help='Conversation session id (default: prod)')
+    ap.add_argument('--voice', default='Joanna', help='TTS voice (default: Joanna)')
+    ap.add_argument('--llm-model', default='gemini-2.0-flash', help='Gemini model id (default: gemini-2.0-flash)')
     ap.add_argument('--system', default='', help='Optional system prompt')
     ap.add_argument('--max-seconds', type=float, default=12.0, help='Max capture length per turn')
     ap.add_argument('--no-play', action='store_true', help='Do not play returned audio')
     args = ap.parse_args()
 
-    print(f"Prod mic ready. Base={args.base} Session={args.session} Voice={args.voice}")
+    print(f"Prod mic ready. Base={args.base} Session={args.session} Voice={args.voice} Model={args.llm_model}")
     print("Press Enter to speak; /quit to exit; /reset to clear history")
 
     while True:
@@ -146,29 +213,40 @@ def main():
                 if resp.status != 200:
                     raise RuntimeError(f"HTTP {resp.status} {resp.reason}")
                 ctype = resp.getheader('Content-Type') or ''
-                body = resp.read()
                 if 'multipart/mixed' not in ctype:
+                    body = resp.read()
                     print(body.decode('utf-8', errors='ignore'))
                     continue
-                # Parse minimally: split parts and extract JSON + audio
-                try:
-                    head, json_and_rest = body.split(b"\r\n\r\n", 1)
-                    json_blob, rest = json_and_rest.split(b"\r\n--", 1)
-                    j = json.loads(json_blob.decode('utf-8', errors='ignore'))
-                    print('You:', (j.get('transcript') or {}).get('text', ''))
-                    print('Assistant:', j.get('llm') or '')
-                except Exception:
-                    pass
-                if args.no_play:
-                    continue
-                # Save entire body for external playback if needed
-                tmp = os.path.join(os.getcwd(), f"prod_reply_{int(time.time())}.bin")
-                try:
-                    with open(tmp, 'wb') as f:
-                        f.write(body)
-                    print('Saved multipart to', tmp)
-                except Exception:
-                    pass
+
+                # Robust multipart parser (buffered)
+                result = {"transcript": None, "llm": None}
+                audio = {"buf": None, "ctype": 'application/octet-stream'}
+
+                def on_json(b: bytes):
+                    try:
+                        j = json.loads(b.decode('utf-8', errors='ignore'))
+                        result['transcript'] = j.get('transcript') if isinstance(j, dict) else None
+                        result['llm'] = j.get('llm') if isinstance(j, dict) else None
+                    except Exception:
+                        pass
+
+                def on_audio(b: bytes, ct: str):
+                    audio['buf'] = b
+                    audio['ctype'] = ct
+
+                parse_multipart(resp, on_json, on_audio)
+
+                user_text = (result.get('transcript') or {}).get('text') if isinstance(result.get('transcript'), dict) else ''
+                assist_text = result.get('llm') or ''
+                if user_text:
+                    print('You:', user_text)
+                if assist_text:
+                    print('Assistant:', assist_text)
+                else:
+                    print('Assistant: (no text)')
+
+                if audio.get('buf') and not args.no_play:
+                    save_and_play(audio['buf'], audio.get('ctype', 'application/octet-stream'))
         except urllib.error.HTTPError as e:
             print('Server error:', e.read().decode('utf-8', errors='ignore'))
         except Exception as e:
@@ -177,4 +255,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

@@ -7,3 +7,6 @@ waifu.mp3
 .wrangler
 .env.local
 .venv
+tts_downloads/
+prod_reply_*.bin
+keys.txt

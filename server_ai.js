@@ -96,6 +96,51 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // New: direct audio of the LLM reply (no multipart)
+    if (pathName === '/llm_tts') {
+      if (req.method === 'GET') {
+        const help = {
+          method: 'POST',
+          path: '/llm_tts',
+          body: { text: 'user message (required)', voice: 'Brian', session: 'optional id', llm_model: 'gemini-2.0-flash', system: 'optional' },
+          returns: 'audio/mpeg of the assistant reply',
+        };
+        res.writeHead(200, { ...corsHeaders(), 'content-type': 'application/json' });
+        return res.end(JSON.stringify(help, null, 2));
+      }
+      if (req.method !== 'POST') {
+        res.writeHead(405, { ...corsHeaders(), 'content-type': 'text/plain; charset=utf-8' });
+        return res.end('Method Not Allowed');
+      }
+      let data = {};
+      try { data = await readJson(req); } catch (e) {
+        res.writeHead(400, { ...corsHeaders(), 'content-type': 'text/plain; charset=utf-8' });
+        return res.end('Invalid JSON');
+      }
+      const userText = (data && typeof data.text === 'string') ? data.text : '';
+      if (!userText) {
+        res.writeHead(400, { ...corsHeaders(), 'content-type': 'text/plain; charset=utf-8' });
+        return res.end('Missing text');
+      }
+      const sessionId = data.session || 'default';
+      const model = data.llm_model || 'gemini-2.0-flash';
+      const systemParam = data.system || '';
+      const voice = data.voice || 'Brian';
+      try {
+        const messages = buildMessages(sessionId, systemParam, userText);
+        const sysText = systemParam || (convoStore.get(sessionId)?.system) || '';
+        const mergedSystem = [sysText, DEFAULT_SYSTEM].filter(Boolean).join("\n\n");
+        const reply = await callGemini({ model, system: mergedSystem, messages });
+        appendHistory(sessionId, systemParam, userText, reply);
+        const { audio, contentType } = await fetchTTS(voice, reply || '');
+        res.writeHead(200, { ...corsHeaders(), 'content-type': contentType, 'cache-control': 'no-store', 'content-length': String(audio.length) });
+        return res.end(audio);
+      } catch (e) {
+        res.writeHead(502, { ...corsHeaders(), 'content-type': 'text/plain; charset=utf-8' });
+        return res.end('Upstream error: ' + String(e?.message || e));
+      }
+    }
+
     if (pathName === '/transcribe') {
       if (req.method === 'GET') {
         const help = {
@@ -326,4 +371,3 @@ function appendHistory(sessionId, systemParam, userText, assistantText) {
 }
 
 module.exports = { server, callGemini, buildMessages, appendHistory, convoStore, DEFAULT_SYSTEM };
-

@@ -72,16 +72,21 @@ Prod AI Service
   - Add env var `GEMINI_API_KEY` (secret).
   - Add env var `VOSK_MODEL_DIR` pointing to your Vosk model path if hosting ASR on the service. Hosting models may require a paid plan and/or persistent disk.
     - Alternative: run the ASR locally and only use `/llm` remotely.
-- Endpoints (ai-waifu):
+- Endpoints (ai-waifu and local server.js):
   - `POST /llm?session=...&llm_model=...&system=...&reset=1` with `{ "text": "..." }` → `{ ok, reply }`.
   - `POST /transcribe?return=original|tts|llm_tts&voice=...&session=...&llm_model=...&system=...` with binary audio body → `multipart/mixed` parts: JSON transcript (+ assistant text when llm_tts), then audio.
-  - Aliases: `/ai/llm` and `/ai/transcribe` are available for clarity.
+  - Aliases: `/ai/llm` and `/ai/transcribe` are available for clarity (on server_ai.js).
+  - Direct audio: `POST /llm_tts` with `{ text, voice?, session?, llm_model?, system? }` → returns `audio/mpeg` of the assistant reply (no multipart). Available on both servers.
 
-Prod Client
-- Minimal client aimed at lightweight devices:
-  - `scripts/prod_mic_convo.py` records locally and sends to `ai-waifu` (`/transcribe?return=llm_tts`). All compute runs on the server.
-  - Example: `python3 scripts/prod_mic_convo.py --base https://<ai-service>.onrender.com --session dev1 --voice Joanna`
-  - Set default base via env: `export AI_BASE=https://<ai-service>.onrender.com`
+Prod Clients
+- Mic client (hands-free):
+  - `python3 scripts/prod_mic_convo.py` (defaults to local base; flags optional)
+  - Example remote: `python3 scripts/prod_mic_convo.py --base https://<ai-service>.onrender.com --session dev1 --voice Joanna`
+- Curl helpers:
+  - Basic TTS demo (/tts): `./scripts/curl_play.sh -b https://tts-waifu.onrender.com -t "hello" -v Brian`
+  - LLM→TTS direct audio (/llm_tts):
+    - Local: `./scripts/curl_llm_tts.sh -b http://127.0.0.1:8787 -t "say hello" -v Brian`
+    - Render: `./scripts/curl_llm_tts.sh -b https://<ai-service>.onrender.com -t "say hello" -v Brian`
 
  Python Client
  - `scripts/examples/play_waifu.py` can target any host. Examples:
