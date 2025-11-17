@@ -76,7 +76,9 @@ Prod AI Service
   - `POST /llm?session=...&llm_model=...&system=...&reset=1` with `{ "text": "..." }` → `{ ok, reply }`.
   - `POST /transcribe?return=original|tts|llm_tts&voice=...&session=...&llm_model=...&system=...` with binary audio body → `multipart/mixed` parts: JSON transcript (+ assistant text when llm_tts), then audio.
   - Aliases: `/ai/llm` and `/ai/transcribe` are available for clarity (on server_ai.js).
-  - Direct audio: `POST /llm_tts` with `{ text, voice?, session?, llm_model?, system? }` → returns `audio/mpeg` of the assistant reply (no multipart). Available on both servers.
+  - Direct audio: `POST /llm_tts` → returns `audio/mpeg` of the assistant reply (no multipart). Two modes:
+    - JSON: `{ text, voice?, session?, llm_model?, system? }`
+    - Audio-in: send binary `audio/wav|mpeg|ogg` body with optional query `voice`, `session`, `llm_model`, `system`; server transcribes, calls Gemini, returns TTS.
 
 Prod Clients
 - Mic client (hands-free):
@@ -84,9 +86,13 @@ Prod Clients
   - Example remote: `python3 scripts/prod_mic_convo.py --base https://<ai-service>.onrender.com --session dev1 --voice Joanna`
 - Curl helpers:
   - Basic TTS demo (/tts): `./scripts/curl_play.sh -b https://tts-waifu.onrender.com -t "hello" -v Brian`
-  - LLM→TTS direct audio (/llm_tts):
-    - Local: `./scripts/curl_llm_tts.sh -b http://127.0.0.1:8787 -t "say hello" -v Brian`
-    - Render: `./scripts/curl_llm_tts.sh -b https://<ai-service>.onrender.com -t "say hello" -v Brian`
+- LLM→TTS direct audio (/llm_tts):
+    - Local (text): `./scripts/curl_llm_tts.sh -b http://127.0.0.1:8787 -t "say hello" -v Brian`
+    - Local (audio): `./scripts/curl_llm_tts.sh -b http://127.0.0.1:8787 -f sample.wav -v Brian`
+    - Render: `./scripts/curl_llm_tts.sh -b https://<ai-service>.onrender.com -t "say hello" -v Joanna`
+  - Mic → LLM→TTS (python):
+    - mac default playback: `python3 scripts/mic_llm_tts.py`
+    - Pi ALSA playback: `python3 scripts/mic_llm_tts.py --pi --alsa-dev plughw:1,0`
 
  Python Client
  - `scripts/examples/play_waifu.py` can target any host. Examples:
