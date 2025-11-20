@@ -10,3 +10,9 @@ waifu.mp3
 tts_downloads/
 prod_reply_*.bin
 keys.txt
+
+# Vosk model files (downloaded by Dockerfile, should not be committed)
+models/
+*.wav
+*.mp3
+*.zip
