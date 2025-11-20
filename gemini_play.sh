@@ -94,15 +94,20 @@ if [[ -n "$FILE" ]]; then
     ogg) ctype="audio/ogg";;
     aac) ctype="audio/aac";;
   esac
-  if ! curl -sS -X POST \
+  http_code=$(curl -sS -X POST \
     -H "Content-Type: ${ctype}" \
     --data-binary @"$FILE" \
     "${BASE%/}/llm_tts?debug=1&voice=$(printf %s "$VOICE" | python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.stdin.read()))')&session=$(printf %s "$SESSION" | python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.stdin.read()))')&llm_model=$(printf %s "$MODEL" | python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.stdin.read()))')" \
-    -o "$OUT" -w "\nHTTP Status: %{http_code}\n"; then
-    echo "Error: curl request failed" >&2
+    -o "$OUT" -w "%{http_code}")
+
+  echo "HTTP Status: $http_code"
+
+  if [[ "$http_code" != "200" ]]; then
+    echo "Error: Server returned status $http_code" >&2
     if [[ -f "$OUT" && -s "$OUT" ]]; then
       echo "Server response:" >&2
       cat "$OUT" >&2
+      echo "" >&2
     fi
     exit 1
   fi
